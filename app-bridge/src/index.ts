@@ -22,8 +22,47 @@ import { app } from "./features/app";
 import { loading } from "./features/loading";
 import { navMenu } from "./features/nav-menu";
 
+// ---------------------------------------------------------------------------
+// Patch URL.prototype.origin to fix App Bridge v3/v4 postMessage targetOrigin.
+//
+// App Bridge v4 (MessageTransport.fromWindow.dispatch) computes:
+//   var messageOrigin = new URL("https://" + message.source.host).origin;
+//   contentWindow.postMessage(message, messageOrigin);
+// where message.source.host is the shop domain (e.g. "test-dev-xxx.myshopify.com").
+//
+// In mock mode the admin frame is at http://localhost:3080, not the shop domain,
+// so targetOrigin never matches and the message is silently dropped.
+//
+// Fix: patch the URL constructor so that .origin for any *.myshopify.com URL
+// returns the mock admin frame's origin (derived from this script's own src URL).
+// This script is served by the mock bridge server, so document.currentScript.src
+// gives us the correct admin origin without hardcoding it.
+// ---------------------------------------------------------------------------
+(function patchURLForMockBridge() {
+  const scriptEl = document.currentScript as HTMLScriptElement | null;
+  if (!scriptEl?.src) return;
+
+  const mockAdminOrigin = new URL(scriptEl.src).origin; // e.g. "http://localhost:3080"
+
+  const _OrigURL = window.URL;
+
+  class PatchedURL extends _OrigURL {
+    constructor(url: string | URL, base?: string | URL) {
+      super(url as string, base);
+    }
+
+    override get origin(): string {
+      const orig = super.origin;
+      return orig.endsWith(".myshopify.com") ? mockAdminOrigin : orig;
+    }
+  }
+
+  // Preserve static methods (createObjectURL, revokeObjectURL, etc.)
+  window.URL = PatchedURL as unknown as typeof URL;
+})();
+
 (function (window) {
-  'use strict';
+  "use strict";
 
   // Store for app instances
   const appInstances = new Map();
@@ -34,20 +73,20 @@ import { navMenu } from "./features/nav-menu";
   const Actions = {
     Modal: {
       Action: {
-        OPEN: 'MODAL_OPEN',
-        CLOSE: 'MODAL_CLOSE',
-        UPDATE: 'MODAL_UPDATE',
-        DATA: 'MODAL_DATA',
+        OPEN: "MODAL_OPEN",
+        CLOSE: "MODAL_CLOSE",
+        UPDATE: "MODAL_UPDATE",
+        DATA: "MODAL_DATA",
       },
       Size: {
-        Small: 'small',
-        Medium: 'medium',
-        Large: 'large',
-        Full: 'full',
+        Small: "small",
+        Medium: "medium",
+        Large: "large",
+        Full: "full",
       },
       create: function (app: any, options: any) {
         return {
-          id: 'modal_' + Date.now(),
+          id: "modal_" + Date.now(),
           dispatch: function (action: any) {
             app.dispatch({ type: action, payload: options });
           },
@@ -63,14 +102,14 @@ import { navMenu } from "./features/nav-menu";
     },
     Toast: {
       Action: {
-        SHOW: 'TOAST_SHOW',
-        CLEAR: 'TOAST_CLEAR',
+        SHOW: "TOAST_SHOW",
+        CLEAR: "TOAST_CLEAR",
       },
       create: function (app: any, options: any) {
         return {
           dispatch: function (action: any) {
             if (action === Actions.Toast.Action.SHOW) {
-              console.log('[MockAppBridge] Toast:', options.message);
+              console.log("[MockAppBridge] Toast:", options.message);
               // In a real implementation, show a toast UI
             }
           },
@@ -79,8 +118,8 @@ import { navMenu } from "./features/nav-menu";
     },
     Loading: {
       Action: {
-        START: 'LOADING_START',
-        STOP: 'LOADING_STOP',
+        START: "LOADING_START",
+        STOP: "LOADING_STOP",
       },
       create: function (app: any) {
         return {
@@ -92,27 +131,30 @@ import { navMenu } from "./features/nav-menu";
     },
     TitleBar: {
       Action: {
-        UPDATE: 'TITLEBAR_UPDATE',
+        UPDATE: "TITLEBAR_UPDATE",
       },
       create: function (app: any, options: any) {
         return {
           set: function (newOptions: any) {
             Object.assign(options, newOptions);
-            app.dispatch({ type: Actions.TitleBar.Action.UPDATE, payload: options });
+            app.dispatch({
+              type: Actions.TitleBar.Action.UPDATE,
+              payload: options,
+            });
           },
         };
       },
     },
     ResourcePicker: {
       Action: {
-        OPEN: 'RESOURCE_PICKER_OPEN',
-        SELECT: 'RESOURCE_PICKER_SELECT',
-        CANCEL: 'RESOURCE_PICKER_CANCEL',
+        OPEN: "RESOURCE_PICKER_OPEN",
+        SELECT: "RESOURCE_PICKER_SELECT",
+        CANCEL: "RESOURCE_PICKER_CANCEL",
       },
       ResourceType: {
-        Product: 'product',
-        ProductVariant: 'variant',
-        Collection: 'collection',
+        Product: "product",
+        ProductVariant: "variant",
+        Collection: "collection",
       },
       create: function (app: any, options: any) {
         const subscribers = new Map();
@@ -122,14 +164,18 @@ import { navMenu } from "./features/nav-menu";
               // Mock selection after a delay
               setTimeout(() => {
                 const mockSelection = {
-                  selection: [{
-                    id: 'gid://shopify/Product/123456',
-                    title: 'Mock Product',
-                    handle: 'mock-product',
-                  }],
+                  selection: [
+                    {
+                      id: "gid://shopify/Product/123456",
+                      title: "Mock Product",
+                      handle: "mock-product",
+                    },
+                  ],
                 };
-                subscribers.forEach(callback => {
-                  if (callback.action === Actions.ResourcePicker.Action.SELECT) {
+                subscribers.forEach((callback) => {
+                  if (
+                    callback.action === Actions.ResourcePicker.Action.SELECT
+                  ) {
                     callback.handler(mockSelection);
                   }
                 });
@@ -146,15 +192,15 @@ import { navMenu } from "./features/nav-menu";
     },
     Redirect: {
       Action: {
-        APP: 'APP_REDIRECT',
-        REMOTE: 'REMOTE_REDIRECT',
-        ADMIN_PATH: 'ADMIN_PATH_REDIRECT',
+        APP: "APP_REDIRECT",
+        REMOTE: "REMOTE_REDIRECT",
+        ADMIN_PATH: "ADMIN_PATH_REDIRECT",
       },
       create: function (app: any) {
         return {
           dispatch: function (action: any, payload: any) {
             if (action === Actions.Redirect.Action.REMOTE) {
-              window.open(payload.url, payload.newContext ? '_blank' : '_self');
+              window.open(payload.url, payload.newContext ? "_blank" : "_self");
             }
           },
         };
@@ -168,10 +214,10 @@ import { navMenu } from "./features/nav-menu";
     },
     Error: {
       Action: {
-        INVALID_ACTION: 'INVALID_ACTION',
-        INVALID_PAYLOAD: 'INVALID_PAYLOAD',
-        NETWORK: 'NETWORK_ERROR',
-        UNAUTHORIZED: 'UNAUTHORIZED',
+        INVALID_ACTION: "INVALID_ACTION",
+        INVALID_PAYLOAD: "INVALID_PAYLOAD",
+        NETWORK: "NETWORK_ERROR",
+        UNAUTHORIZED: "UNAUTHORIZED",
       },
     },
   };
@@ -182,25 +228,28 @@ import { navMenu } from "./features/nav-menu";
       // Request session token from parent frame
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
-          reject(new Error('Session token request timeout'));
+          reject(new Error("Session token request timeout"));
         }, 5000);
 
         const handler = function (event: any) {
-          if (event.data && event.data.type === 'SESSION_TOKEN_RESPONSE') {
+          if (event.data && event.data.type === "SESSION_TOKEN_RESPONSE") {
             clearTimeout(timeout);
-            window.removeEventListener('message', handler);
+            window.removeEventListener("message", handler);
             currentSessionToken = event.data.token;
             resolve(event.data.token);
           }
         };
 
-        window.addEventListener('message', handler);
+        window.addEventListener("message", handler);
 
         // Post message to parent requesting token
-        window.parent.postMessage({
-          type: 'SESSION_TOKEN_REQUEST',
-          source: 'app',
-        }, '*');
+        window.parent.postMessage(
+          {
+            type: "SESSION_TOKEN_REQUEST",
+            source: "app",
+          },
+          "*",
+        );
       });
     },
 
@@ -211,12 +260,12 @@ import { navMenu } from "./features/nav-menu";
         const url = args[0];
         const options = args[1] || {};
 
-        if (typeof url === 'string') {
+        if (typeof url === "string") {
           options.headers = options.headers || {};
           if (options.headers instanceof Headers) {
-            options.headers.append('Authorization', `Bearer ${token}`);
+            options.headers.append("Authorization", `Bearer ${token}`);
           } else {
-            options.headers['Authorization'] = `Bearer ${token}`;
+            options.headers["Authorization"] = `Bearer ${token}`;
           }
         }
 
@@ -228,10 +277,10 @@ import { navMenu } from "./features/nav-menu";
   // Main createApp function
   function createApp(config: any) {
     if (!config.apiKey) {
-      throw new Error('API key is required');
+      throw new Error("API key is required");
     }
     if (!config.host) {
-      throw new Error('Host is required');
+      throw new Error("Host is required");
     }
 
     const app = {
@@ -240,14 +289,17 @@ import { navMenu } from "./features/nav-menu";
       errorListeners: new Set(),
 
       dispatch: function (action: any) {
-        console.log('[MockAppBridge] Dispatching:', action);
+        console.log("[MockAppBridge] Dispatching:", action);
 
         // Send to parent frame
-        window.parent.postMessage({
-          type: 'APP_BRIDGE_ACTION',
-          action: action,
-          source: 'app',
-        }, '*');
+        window.parent.postMessage(
+          {
+            type: "APP_BRIDGE_ACTION",
+            action: action,
+            source: "app",
+          },
+          "*",
+        );
 
         // Notify local listeners
         this.listeners.forEach((listener: any) => listener(action));
@@ -256,7 +308,7 @@ import { navMenu } from "./features/nav-menu";
       subscribe: function (eventNameOrCallback: any, callback: any) {
         const handler = callback || eventNameOrCallback;
         const wrappedHandler = (action: any) => {
-          if (typeof eventNameOrCallback === 'string') {
+          if (typeof eventNameOrCallback === "string") {
             if (action.type === eventNameOrCallback) {
               handler(action);
             }
@@ -282,13 +334,13 @@ import { navMenu } from "./features/nav-menu";
       getState: async function () {
         return {
           staffMember: {
-            id: '123456789',
-            name: 'Test User',
-            email: 'test@mockshop.com',
+            id: "123456789",
+            name: "Test User",
+            email: "test@mockshop.com",
           },
           shop: {
             domain: new URL(atob(config.host)).hostname,
-            name: 'Mock Shop',
+            name: "Mock Shop",
           },
         };
       },
@@ -307,7 +359,7 @@ import { navMenu } from "./features/nav-menu";
         try {
           await utilities.getSessionToken(app);
         } catch (error) {
-          console.error('[MockAppBridge] Token refresh failed:', error);
+          console.error("[MockAppBridge] Token refresh failed:", error);
         }
       }, 50000); // Refresh every 50 seconds
     }
@@ -364,35 +416,38 @@ import { navMenu } from "./features/nav-menu";
     loading: loading(),
 
     // Origin should be empty string for mock
-    origin: '',
+    origin: "",
 
     // Add idToken method directly to shopify global for useAppBridge() compatibility
     idToken: async function () {
-      console.log('[MockAppBridge] idToken called on shopify global');
+      console.log("[MockAppBridge] idToken called on shopify global");
       // Request session token from parent frame
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
-          reject(new Error('Session token request timeout'));
+          reject(new Error("Session token request timeout"));
         }, 5000);
 
         const handler = function (event: any) {
-          if (event.data && event.data.type === 'SESSION_TOKEN_RESPONSE') {
+          if (event.data && event.data.type === "SESSION_TOKEN_RESPONSE") {
             clearTimeout(timeout);
-            window.removeEventListener('message', handler);
+            window.removeEventListener("message", handler);
 
             currentSessionToken = event.data.token;
             resolve(event.data.token);
           }
         };
 
-        window.addEventListener('message', handler);
+        window.addEventListener("message", handler);
 
-        window.parent.postMessage({
-          type: 'SESSION_TOKEN_REQUEST',
-          source: 'app',
-        }, '*');
+        window.parent.postMessage(
+          {
+            type: "SESSION_TOKEN_REQUEST",
+            source: "app",
+          },
+          "*",
+        );
       });
-    }
+    },
   };
 
   // For @shopify/app-bridge-react compatibility, we need to ensure
@@ -409,12 +464,12 @@ import { navMenu } from "./features/nav-menu";
   // Initialize nav menu observer
   navMenu();
 
-  console.log('[MockAppBridge] Client library loaded');
+  console.log("[MockAppBridge] Client library loaded");
 
   // Admin API configuration - will be fetched from server
-  type AdminApiConfig = 'mock' | { proxy: string } | { accessToken: string };
-  let adminApiConfig: AdminApiConfig = 'mock';
-  let mockServerUrl = '';
+  type AdminApiConfig = "mock" | { proxy: string } | { accessToken: string };
+  let adminApiConfig: AdminApiConfig = "mock";
+  let mockServerUrl = "";
 
   // Detect mock server URL from script src or parent origin
   const detectMockServerUrl = (): string => {
@@ -436,7 +491,7 @@ import { navMenu } from "./features/nav-menu";
       // Cross-origin, try to extract from referrer
     }
     // Default fallback
-    return 'http://localhost:3080';
+    return "http://localhost:3080";
   };
 
   mockServerUrl = detectMockServerUrl();
@@ -448,10 +503,12 @@ import { navMenu } from "./features/nav-menu";
       const config = await response.json();
       if (config.adminApi) {
         adminApiConfig = config.adminApi;
-        console.log('[MockAppBridge] Admin API config:', adminApiConfig);
+        console.log("[MockAppBridge] Admin API config:", adminApiConfig);
       }
     } catch (error) {
-      console.warn('[MockAppBridge] Could not fetch admin API config, using default (mock)');
+      console.warn(
+        "[MockAppBridge] Could not fetch admin API config, using default (mock)",
+      );
     }
   };
 
@@ -460,16 +517,25 @@ import { navMenu } from "./features/nav-menu";
 
   // Check if URL is an Admin API request
   const isAdminApiRequest = (url: string): boolean => {
-    if (typeof url !== 'string') return false;
-    return url.includes('/admin/api/') ||
-           url.match(/^https:\/\/[^/]+\.myshopify\.com\/admin\/api\//) !== null;
+    if (typeof url !== "string") return false;
+    return (
+      url.includes("/admin/api/") ||
+      url.match(/^https:\/\/[^/]+\.myshopify\.com\/admin\/api\//) !== null
+    );
   };
 
   // Override fetch to intercept Admin API requests
   const _fetch = window.fetch;
-  window.fetch = async (...args: Parameters<typeof fetch>): Promise<Response> => {
+  window.fetch = async (
+    ...args: Parameters<typeof fetch>
+  ): Promise<Response> => {
     const [input, init] = args;
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : (input as Request).url;
     const options = init || {};
 
     // Add authorization header to all requests
@@ -490,45 +556,51 @@ import { navMenu } from "./features/nav-menu";
 
     // Add session token if available
     if (currentSessionToken) {
-      headers['Authorization'] = `Bearer ${currentSessionToken}`;
+      headers["Authorization"] = `Bearer ${currentSessionToken}`;
     }
 
     // Check if this is an Admin API request
     if (isAdminApiRequest(url)) {
-      console.log('[MockAppBridge] Intercepting Admin API request:', url);
+      console.log("[MockAppBridge] Intercepting Admin API request:", url);
 
-      if (adminApiConfig === 'mock') {
+      if (adminApiConfig === "mock") {
         // Route to mock server
         return _fetch(`${mockServerUrl}/mock-admin-api`, {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
             ...headers,
           },
           body: JSON.stringify({
             url,
-            method: options.method || 'GET',
+            method: options.method || "GET",
             body: options.body,
           }),
         });
-      } else if (typeof adminApiConfig === 'object' && 'proxy' in adminApiConfig) {
+      } else if (
+        typeof adminApiConfig === "object" &&
+        "proxy" in adminApiConfig
+      ) {
         // Route to app's proxy endpoint
         return _fetch(adminApiConfig.proxy, {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
             ...headers,
           },
           body: JSON.stringify({
             url,
-            method: options.method || 'GET',
+            method: options.method || "GET",
             body: options.body,
           }),
         });
-      } else if (typeof adminApiConfig === 'object' && 'accessToken' in adminApiConfig) {
+      } else if (
+        typeof adminApiConfig === "object" &&
+        "accessToken" in adminApiConfig
+      ) {
         // Make direct request to Shopify with access token
-        headers['X-Shopify-Access-Token'] = adminApiConfig.accessToken;
-        delete headers['Authorization']; // Use access token instead
+        headers["X-Shopify-Access-Token"] = adminApiConfig.accessToken;
+        delete headers["Authorization"]; // Use access token instead
         return _fetch(url, {
           ...options,
           headers,
