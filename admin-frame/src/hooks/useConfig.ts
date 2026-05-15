@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-type AdminApiConfig = 'mock' | { proxy: string } | { accessToken: string };
+type AdminApiConfig = "mock" | { proxy: string } | { accessToken: string };
 
 interface Config {
   clientId: string;
@@ -10,6 +10,8 @@ interface Config {
   appPath?: string;
   adminApi?: AdminApiConfig;
   proxy?: boolean;
+  proxyPort?: number;
+  appName?: string;
 }
 
 let cachedConfig: Config | null = null;
@@ -22,24 +24,25 @@ export function useConfig() {
 
     const controller = new AbortController();
 
-    fetch('/api/config', {
+    fetch("/api/config", {
       signal: controller.signal,
-    }).then(res => res.json())
-      .then(data => {
+    })
+      .then((res) => res.json())
+      .then((data) => {
         if (!data) return null;
 
         cachedConfig = data;
         setConfig(data);
       })
-      .catch(err => {
-        if (err.toString().includes('cleanup')) return null;
+      .catch((err) => {
+        if (err.toString().includes("cleanup")) return null;
 
-        console.error('Error fetching config:', err);
+        console.error("Error fetching config:", err);
       });
 
     return () => {
-      controller.abort('Effect cleanup');
-    }
+      controller.abort("Effect cleanup");
+    };
   }, [config]);
 
   return config;

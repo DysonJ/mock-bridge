@@ -4,14 +4,16 @@
  * - { proxy: string }: Forward requests to an app-provided proxy endpoint
  * - { accessToken: string }: Make direct requests to Shopify with the provided token
  */
-export type AdminApiConfig = 'mock' | {
+export type AdminApiConfig = "mock" | {
     proxy: string;
 } | {
     accessToken: string;
 };
 export interface MockShopifyAdminConfig {
     port?: number;
+    proxyPort?: number;
     appUrl: string;
+    appName?: string;
     appPath?: string;
     clientId?: string;
     clientSecret?: string;
@@ -51,16 +53,16 @@ export interface AppState {
     };
 }
 export interface SessionTokenRequest {
-    type: 'SESSION_TOKEN_REQUEST';
+    type: "SESSION_TOKEN_REQUEST";
 }
 export interface SessionTokenResponse {
-    type: 'SESSION_TOKEN_RESPONSE';
+    type: "SESSION_TOKEN_RESPONSE";
     token: string;
 }
 export interface AppBridgeMessage {
     type: string;
     payload?: any;
-    source?: 'app' | 'host';
+    source?: "app" | "host";
 }
 export interface MockShop {
     domain: string;

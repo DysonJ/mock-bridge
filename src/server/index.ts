@@ -1,32 +1,50 @@
-import express, { Express, Request, Response } from 'express';
-import cors from 'cors';
-import bodyParser from 'body-parser';
-import path from 'path';
-import { createProxyMiddleware } from 'http-proxy-middleware';
-import { TokenGenerator } from '../auth/token-generator';
-import { MockShopifyAdminConfig, MockShop, MockUser } from '../types';
-import { STANDARD_MOCK_CLIENT_ID, STANDARD_MOCK_SECRET } from '../auth/constants';
+import express, { Express, Request, Response } from "express";
+import cors from "cors";
+import bodyParser from "body-parser";
+import path from "path";
+import fs from "fs";
+import {
+  createProxyMiddleware,
+  responseInterceptor,
+} from "http-proxy-middleware";
+import { TokenGenerator } from "../auth/token-generator";
+import { MockShopifyAdminConfig, MockShop, MockUser } from "../types";
+import {
+  STANDARD_MOCK_CLIENT_ID,
+  STANDARD_MOCK_SECRET,
+} from "../auth/constants";
 
 export class MockShopifyAdminServer {
   private app: Express;
   private config: MockShopifyAdminConfig;
   private tokenGenerator: TokenGenerator;
   private server: any;
+  private proxyServer: any;
   private mockShop: MockShop;
   private mockUser: MockUser;
 
   constructor(config: MockShopifyAdminConfig) {
     this.config = {
       port: 3080,
-      shop: 'test-shop.myshopify.com',
+      shop: "test-shop.myshopify.com",
       clientId: STANDARD_MOCK_CLIENT_ID,
       clientSecret: STANDARD_MOCK_SECRET,
-      apiVersion: '2024-01',
-      scopes: ['read_products', 'write_products', 'read_orders', 'write_orders'],
+      apiVersion: "2024-01",
+      scopes: [
+        "read_products",
+        "write_products",
+        "read_orders",
+        "write_orders",
+      ],
       debug: false,
-      adminApi: 'mock',
+      adminApi: "mock",
       ...config,
     };
+
+    // Auto-enable HTTP proxy when appUrl is HTTPS (avoids mixed-content blocking)
+    if (!this.config.proxyPort && this.config.appUrl?.startsWith("https://")) {
+      this.config.proxyPort = (this.config.port ?? 3080) + 1;
+    }
 
     this.app = express();
     this.tokenGenerator = new TokenGenerator(this.config.clientSecret!);
@@ -34,18 +52,18 @@ export class MockShopifyAdminServer {
     // Initialize mock data
     this.mockShop = {
       domain: this.config.shop!,
-      name: 'Mock Shop',
-      email: 'mock@shop.com',
-      plan: 'developer',
+      name: "Mock Shop",
+      email: "mock@shop.com",
+      plan: "developer",
       createdAt: new Date().toISOString(),
     };
 
     this.mockUser = {
-      id: this.config.userId || '123456789',
-      email: 'test@mockshop.com',
-      firstName: 'Test',
-      lastName: 'User',
-      displayName: 'Test User',
+      id: this.config.userId || "123456789",
+      email: "test@mockshop.com",
+      firstName: "Test",
+      lastName: "User",
+      displayName: "Test User",
     };
 
     this.setupMiddleware();
@@ -54,33 +72,43 @@ export class MockShopifyAdminServer {
 
   private setupMiddleware(): void {
     // Enable CORS for all origins in mock mode
-    this.app.use(cors({
-      origin: true,
-      credentials: true,
-    }));
+    this.app.use(
+      cors({
+        origin: true,
+        credentials: true,
+      }),
+    );
 
     this.app.use(bodyParser.json());
     this.app.use(bodyParser.urlencoded({ extended: true }));
 
     // Serve static files from client directory
-    this.app.use('/static', express.static(path.join(__dirname, '../client')));
-    this.app.use(express.static(path.join(__dirname, '../../admin-frame/dist')));
+    this.app.use("/static", express.static(path.join(__dirname, "../client")));
+    this.app.use(
+      express.static(path.join(__dirname, "../../admin-frame/dist")),
+    );
 
     // Mock Shopify Admin page with embedded app
-    this.app.use('/admin/apps/:clientId', (req: Request, res: Response, next) => {
-      // const { host, shop } = req.query;
+    this.app.use(
+      "/admin/apps/:clientId",
+      (req: Request, res: Response, next) => {
+        // const { host, shop } = req.query;
 
-      // Set CSP header to allow iframe embedding
-      const frameSrc = this.config.proxy ? `'self'` : `'self' ${this.config.appUrl}`;
-      res.setHeader('Content-Security-Policy',
-        `frame-src ${frameSrc}; ` +
-        `frame-ancestors 'self' localhost:*; ` +
-        `script-src 'self' 'unsafe-inline' 'unsafe-eval';`
-      );
+        // Set CSP header to allow iframe embedding
+        const frameSrc = this.config.proxy
+          ? `'self'`
+          : `'self' ${this.config.appUrl}`;
+        res.setHeader(
+          "Content-Security-Policy",
+          `frame-src ${frameSrc}; ` +
+            `frame-ancestors 'self' localhost:*; ` +
+            `script-src 'self' 'unsafe-inline' 'unsafe-eval';`,
+        );
 
-      // res.send(this.getAdminHTML(host as string, shop as string));
-      next();
-    });
+        // res.send(this.getAdminHTML(host as string, shop as string));
+        next();
+      },
+    );
 
     // this.app.use('/admin', express.static(path.join(__dirname, '../../admin-frame/dist')));
 
@@ -95,21 +123,29 @@ export class MockShopifyAdminServer {
 
   private setupRoutes(): void {
     // Serve logo images
-    this.app.get('/logo', (req: Request, res: Response) => {
-      res.sendFile(path.join(__dirname, '../../assets/img/mock-bridge-logo-200px.jpg'));
+    this.app.get("/logo", (req: Request, res: Response) => {
+      res.sendFile(
+        path.join(__dirname, "../../assets/img/mock-bridge-logo-200px.jpg"),
+      );
     });
 
-    this.app.get('/favicon.ico', (req: Request, res: Response) => {
-      res.sendFile(path.join(__dirname, '../../assets/img/mock-bridge-logo-200px.jpg'));
+    this.app.get("/favicon.ico", (req: Request, res: Response) => {
+      res.sendFile(
+        path.join(__dirname, "../../assets/img/mock-bridge-logo-200px.jpg"),
+      );
     });
 
     // Main admin route - serves the mock Shopify Admin page
-    this.app.get('/', (req: Request, res: Response) => {
-      const hostBase64 = Buffer.from(`https://${this.config.shop}`).toString('base64');
-      res.redirect(`/admin/apps/${this.config.clientId}?host=${hostBase64}&shop=${this.config.shop}`);
+    this.app.get("/", (req: Request, res: Response) => {
+      const hostBase64 = Buffer.from(`https://${this.config.shop}`).toString(
+        "base64",
+      );
+      res.redirect(
+        `/admin/apps/${this.config.clientId}?host=${hostBase64}&shop=${this.config.shop}`,
+      );
     });
 
-    this.app.get('/api/config', (req: Request, res: Response) => {
+    this.app.get("/api/config", (req: Request, res: Response) => {
       res.json({
         clientId: this.config.clientId,
         shop: this.config.shop,
@@ -117,11 +153,13 @@ export class MockShopifyAdminServer {
         appPath: this.config.appPath,
         adminApi: this.config.adminApi,
         proxy: this.config.proxy,
+        proxyPort: this.config.proxyPort,
+        appName: this.config.appName,
       });
     });
 
     // Session token endpoint
-    this.app.post('/api/session-token', (req: Request, res: Response) => {
+    this.app.post("/api/session-token", (req: Request, res: Response) => {
       const token = this.tokenGenerator.generateSessionToken({
         shop: this.config.shop!,
         clientId: this.config.clientId!,
@@ -133,29 +171,32 @@ export class MockShopifyAdminServer {
     });
 
     // Mock GraphQL Admin API endpoint
-    this.app.post('/admin/api/:version/graphql.json', (req: Request, res: Response) => {
-      const authHeader = req.headers.authorization;
+    this.app.post(
+      "/admin/api/:version/graphql.json",
+      (req: Request, res: Response) => {
+        const authHeader = req.headers.authorization;
 
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({
-          errors: [{ message: 'Unauthorized' }]
-        });
-      }
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+          return res.status(401).json({
+            errors: [{ message: "Unauthorized" }],
+          });
+        }
 
-      // For mock purposes, return basic shop data
-      res.json({
-        data: {
-          shop: {
-            name: this.mockShop.name,
-            email: this.mockShop.email,
-            domain: this.mockShop.domain,
+        // For mock purposes, return basic shop data
+        res.json({
+          data: {
+            shop: {
+              name: this.mockShop.name,
+              email: this.mockShop.email,
+              domain: this.mockShop.domain,
+            },
           },
-        },
-      });
-    });
+        });
+      },
+    );
 
     // Mock Admin API proxy endpoint - handles intercepted fetch calls from App Bridge
-    this.app.post('/mock-admin-api', (req: Request, res: Response) => {
+    this.app.post("/mock-admin-api", (req: Request, res: Response) => {
       const { url, method, body } = req.body;
 
       if (this.config.debug) {
@@ -163,7 +204,7 @@ export class MockShopifyAdminServer {
       }
 
       // Handle GraphQL requests
-      if (url.includes('/graphql.json')) {
+      if (url.includes("/graphql.json")) {
         return this.handleMockGraphQL(req, res, body);
       }
 
@@ -172,65 +213,61 @@ export class MockShopifyAdminServer {
     });
 
     // Mock OAuth token exchange endpoint
-    this.app.post('/admin/oauth/access_token', (req: Request, res: Response) => {
-      const { client_id, client_secret, subject_token } = req.body;
+    this.app.post(
+      "/admin/oauth/access_token",
+      (req: Request, res: Response) => {
+        const { client_id, client_secret, subject_token } = req.body;
 
-      if (client_id !== this.config.clientId! || client_secret !== this.config.clientSecret!) {
-        return res.status(401).json({ error: 'invalid_client' });
-      }
+        if (
+          client_id !== this.config.clientId! ||
+          client_secret !== this.config.clientSecret!
+        ) {
+          return res.status(401).json({ error: "invalid_client" });
+        }
 
-      try {
-        // Verify the session token
-        this.tokenGenerator.verifySessionToken(subject_token);
+        try {
+          // Verify the session token
+          this.tokenGenerator.verifySessionToken(subject_token);
 
-        // Return mock access tokens
-        res.json({
-          access_token: 'mock_access_token_' + Date.now(),
-          scope: this.config.scopes?.join(',') || '',
-          expires_in: 86400, // 24 hours
-        });
-      } catch (error) {
-        res.status(400).json({ error: 'invalid_grant' });
-      }
-    });
+          // Return mock access tokens
+          res.json({
+            access_token: "mock_access_token_" + Date.now(),
+            scope: this.config.scopes?.join(",") || "",
+            expires_in: 86400, // 24 hours
+          });
+        } catch (error) {
+          res.status(400).json({ error: "invalid_grant" });
+        }
+      },
+    );
 
     // Mock REST API endpoints
-    this.app.get('/admin/api/:version/shop.json', (req: Request, res: Response) => {
-      res.json({
-        shop: this.mockShop,
-      });
-    });
+    this.app.get(
+      "/admin/api/:version/shop.json",
+      (req: Request, res: Response) => {
+        res.json({
+          shop: this.mockShop,
+        });
+      },
+    );
 
     // Mock app bridge script (served for embedded apps)
-    this.app.get('/app-bridge.js', (req: Request, res: Response) => {
-      res.type('application/javascript');
-      const srcPath = path.join(__dirname, '../../app-bridge/dist/index.js');
+    this.app.get("/app-bridge.js", (req: Request, res: Response) => {
+      res.type("application/javascript");
+      const srcPath = path.join(__dirname, "../../app-bridge/dist/index.js");
       res.sendFile(srcPath);
     });
 
-    // Same-origin reverse proxy for Cypress compatibility
-    if (this.config.proxy) {
-      this.app.use('/__proxy', createProxyMiddleware({
-        target: this.config.appUrl,
-        changeOrigin: true,
-        ws: true,
-        pathRewrite: { '^/__proxy': '' },
-        on: {
-          proxyReq: (proxyReq, req) => {
-            if (this.config.debug) {
-              console.log(`[MockShopify] Proxy: ${req.method} ${req.url} -> ${this.config.appUrl}${req.url}`);
-            }
-          },
-        },
-      }));
-    }
+    // (Dual-port HTTP proxy is started separately in startProxyServer())
 
     // Catch-all for undefined routes
-    this.app.use('*', (req: Request, res: Response) => {
+    this.app.use("*", (req: Request, res: Response) => {
       if (this.config.debug) {
-        console.log(`[MockShopify] Unhandled route: ${req.method} ${req.originalUrl}`);
+        console.log(
+          `[MockShopify] Unhandled route: ${req.method} ${req.originalUrl}`,
+        );
       }
-      res.status(404).json({ error: 'Not found' });
+      res.status(404).json({ error: "Not found" });
     });
   }
 
@@ -238,55 +275,55 @@ export class MockShopifyAdminServer {
    * Handle mock GraphQL Admin API requests
    */
   private handleMockGraphQL(req: Request, res: Response, body: any): void {
-    const query = typeof body === 'string' ? body : body?.query || '';
+    const query = typeof body === "string" ? body : body?.query || "";
 
     // Parse the GraphQL query to determine what data to return
     const mockData: any = { data: {} };
 
     // Shop queries
-    if (query.includes('shop')) {
+    if (query.includes("shop")) {
       mockData.data.shop = {
-        id: 'gid://shopify/Shop/1',
+        id: "gid://shopify/Shop/1",
         name: this.mockShop.name,
         email: this.mockShop.email,
         domain: this.mockShop.domain,
         myshopifyDomain: this.config.shop,
-        plan: { displayName: 'Developer' },
+        plan: { displayName: "Developer" },
         primaryDomain: { url: `https://${this.mockShop.domain}` },
       };
     }
 
     // Products queries
-    if (query.includes('products')) {
+    if (query.includes("products")) {
       mockData.data.products = {
         edges: [
           {
             node: {
-              id: 'gid://shopify/Product/1',
-              title: 'Mock Product 1',
-              handle: 'mock-product-1',
-              status: 'ACTIVE',
+              id: "gid://shopify/Product/1",
+              title: "Mock Product 1",
+              handle: "mock-product-1",
+              status: "ACTIVE",
               totalInventory: 100,
               priceRangeV2: {
-                minVariantPrice: { amount: '19.99', currencyCode: 'USD' },
-                maxVariantPrice: { amount: '19.99', currencyCode: 'USD' },
+                minVariantPrice: { amount: "19.99", currencyCode: "USD" },
+                maxVariantPrice: { amount: "19.99", currencyCode: "USD" },
               },
             },
-            cursor: 'cursor1',
+            cursor: "cursor1",
           },
           {
             node: {
-              id: 'gid://shopify/Product/2',
-              title: 'Mock Product 2',
-              handle: 'mock-product-2',
-              status: 'ACTIVE',
+              id: "gid://shopify/Product/2",
+              title: "Mock Product 2",
+              handle: "mock-product-2",
+              status: "ACTIVE",
               totalInventory: 50,
               priceRangeV2: {
-                minVariantPrice: { amount: '29.99', currencyCode: 'USD' },
-                maxVariantPrice: { amount: '29.99', currencyCode: 'USD' },
+                minVariantPrice: { amount: "29.99", currencyCode: "USD" },
+                maxVariantPrice: { amount: "29.99", currencyCode: "USD" },
               },
             },
-            cursor: 'cursor2',
+            cursor: "cursor2",
           },
         ],
         pageInfo: {
@@ -297,26 +334,26 @@ export class MockShopifyAdminServer {
     }
 
     // Orders queries
-    if (query.includes('orders')) {
+    if (query.includes("orders")) {
       mockData.data.orders = {
         edges: [
           {
             node: {
-              id: 'gid://shopify/Order/1001',
-              name: '#1001',
+              id: "gid://shopify/Order/1001",
+              name: "#1001",
               createdAt: new Date().toISOString(),
-              displayFinancialStatus: 'PAID',
-              displayFulfillmentStatus: 'UNFULFILLED',
+              displayFinancialStatus: "PAID",
+              displayFulfillmentStatus: "UNFULFILLED",
               totalPriceSet: {
-                shopMoney: { amount: '49.99', currencyCode: 'USD' },
+                shopMoney: { amount: "49.99", currencyCode: "USD" },
               },
               customer: {
-                id: 'gid://shopify/Customer/1',
-                displayName: 'John Doe',
-                email: 'john@example.com',
+                id: "gid://shopify/Customer/1",
+                displayName: "John Doe",
+                email: "john@example.com",
               },
             },
-            cursor: 'cursor1',
+            cursor: "cursor1",
           },
         ],
         pageInfo: {
@@ -327,19 +364,19 @@ export class MockShopifyAdminServer {
     }
 
     // Customers queries
-    if (query.includes('customers')) {
+    if (query.includes("customers")) {
       mockData.data.customers = {
         edges: [
           {
             node: {
-              id: 'gid://shopify/Customer/1',
-              displayName: 'John Doe',
-              email: 'john@example.com',
-              phone: '+1234567890',
-              ordersCount: '5',
-              totalSpentV2: { amount: '249.95', currencyCode: 'USD' },
+              id: "gid://shopify/Customer/1",
+              displayName: "John Doe",
+              email: "john@example.com",
+              phone: "+1234567890",
+              ordersCount: "5",
+              totalSpentV2: { amount: "249.95", currencyCode: "USD" },
             },
-            cursor: 'cursor1',
+            cursor: "cursor1",
           },
         ],
         pageInfo: {
@@ -351,7 +388,7 @@ export class MockShopifyAdminServer {
 
     // If no specific data matched, return empty data object
     if (Object.keys(mockData.data).length === 0) {
-      mockData.data = { __typename: 'QueryRoot' };
+      mockData.data = { __typename: "QueryRoot" };
     }
 
     res.json(mockData);
@@ -360,69 +397,70 @@ export class MockShopifyAdminServer {
   /**
    * Handle mock REST Admin API requests
    */
-  private handleMockRestApi(req: Request, res: Response, url: string, method: string): void {
+  private handleMockRestApi(
+    req: Request,
+    res: Response,
+    url: string,
+    method: string,
+  ): void {
     // Parse the URL to determine the resource
-    const urlParts = url.split('/');
-    const resource = urlParts.find((part, i) =>
-      urlParts[i - 1]?.match(/^\d{4}-\d{2}$/) // Find part after API version
+    const urlParts = url.split("/");
+    const resource = urlParts.find(
+      (part, i) => urlParts[i - 1]?.match(/^\d{4}-\d{2}$/), // Find part after API version
     );
 
     switch (resource) {
-      case 'shop.json':
+      case "shop.json":
         res.json({ shop: this.mockShop });
         break;
 
-      case 'products.json':
+      case "products.json":
         res.json({
           products: [
             {
               id: 1,
-              title: 'Mock Product 1',
-              handle: 'mock-product-1',
-              status: 'active',
-              variants: [
-                { id: 1, price: '19.99', inventory_quantity: 100 },
-              ],
+              title: "Mock Product 1",
+              handle: "mock-product-1",
+              status: "active",
+              variants: [{ id: 1, price: "19.99", inventory_quantity: 100 }],
             },
             {
               id: 2,
-              title: 'Mock Product 2',
-              handle: 'mock-product-2',
-              status: 'active',
-              variants: [
-                { id: 2, price: '29.99', inventory_quantity: 50 },
-              ],
+              title: "Mock Product 2",
+              handle: "mock-product-2",
+              status: "active",
+              variants: [{ id: 2, price: "29.99", inventory_quantity: 50 }],
             },
           ],
         });
         break;
 
-      case 'orders.json':
+      case "orders.json":
         res.json({
           orders: [
             {
               id: 1001,
-              name: '#1001',
+              name: "#1001",
               created_at: new Date().toISOString(),
-              financial_status: 'paid',
+              financial_status: "paid",
               fulfillment_status: null,
-              total_price: '49.99',
-              customer: { id: 1, email: 'john@example.com' },
+              total_price: "49.99",
+              customer: { id: 1, email: "john@example.com" },
             },
           ],
         });
         break;
 
-      case 'customers.json':
+      case "customers.json":
         res.json({
           customers: [
             {
               id: 1,
-              email: 'john@example.com',
-              first_name: 'John',
-              last_name: 'Doe',
+              email: "john@example.com",
+              first_name: "John",
+              last_name: "Doe",
               orders_count: 5,
-              total_spent: '249.95',
+              total_spent: "249.95",
             },
           ],
         });
@@ -437,7 +475,154 @@ export class MockShopifyAdminServer {
     }
   }
 
+  private startProxyServer(): Promise<void> {
+    if (!this.config.proxyPort) return Promise.resolve();
+
+    const adminPort = this.config.port ?? 3080;
+    const proxyPort = this.config.proxyPort;
+    const appUrl = this.config.appUrl;
+
+    // Inline script injected into every HTML page served from the proxy.
+    // Runs synchronously before any external scripts (including Angular bundles),
+    // so both patches are in effect before app-bridge-core's createApp() runs.
+    //
+    // 1. URL.prototype.origin patch — patches the *prototype getter* so every call
+    //    to .origin on any URL instance (including those in Angular's bundled
+    //    app-bridge-core that captured the constructor before this script ran) uses
+    //    the patched getter at call time. This makes postMessage target the admin frame
+    //    instead of the Shopify shop domain.
+    //
+    // 2. fetch/XHR rewrite — routes https://localhost:PORT/... through /__local-https
+    //    so API calls bypass browser CORS (backend only allows https://localhost:4200).
+    const headPatchScript = `
+<script>
+(function(){
+  var _adminOrigin = 'http://localhost:${adminPort}';
+  window.__mockAdminOrigin = _adminOrigin;
+  var _desc = Object.getOwnPropertyDescriptor(URL.prototype, 'origin');
+  var _origGetter = _desc && _desc.get;
+  if (_origGetter) {
+    Object.defineProperty(URL.prototype, 'origin', {
+      get: function() {
+        var orig = _origGetter.call(this);
+        return orig.endsWith('.myshopify.com') ? _adminOrigin : orig;
+      },
+      configurable: true,
+    });
+  }
+  var _proxyBase = 'http://localhost:${proxyPort}/__local-https/';
+  function rewrite(url) {
+    if (typeof url === 'string') {
+      var m = url.match(/^https:\\/\\/localhost:(\\d+)(\\/.*)$/);
+      if (m) return _proxyBase + m[1] + m[2];
+    }
+    return url;
+  }
+  var _fetch = window.fetch;
+  window.fetch = function(url, opts) { return _fetch.call(this, rewrite(url), opts); };
+  var _open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url) {
+    var args = Array.prototype.slice.call(arguments);
+    args[1] = rewrite(url);
+    return _open.apply(this, args);
+  };
+})();
+</script>`;
+
+    // Build the app-bridge.js response with the correct admin origin prepended.
+    const appBridgeSrc = path.join(__dirname, "../../app-bridge/dist/index.js");
+
+    return new Promise((resolve, reject) => {
+      const proxyApp = express();
+
+      // 1. Serve app-bridge.js locally so Angular can load it from same origin.
+      //    Prepend __mockAdminOrigin so the URL patch targets port 3080 (admin),
+      //    not port 3081 (proxy).
+      proxyApp.get("/app-bridge.js", (_req: Request, res: Response) => {
+        try {
+          const src = fs.readFileSync(appBridgeSrc, "utf8");
+          res.type("application/javascript");
+          res.send(
+            `window.__mockAdminOrigin="http://localhost:${adminPort}";\n` + src,
+          );
+        } catch {
+          res.status(500).send("// app-bridge.js not found");
+        }
+      });
+
+      // 2. /__local-https/:port/... — forwards to https://localhost:PORT server-side,
+      //    bypassing browser CORS.
+      proxyApp.use(
+        "/__local-https",
+        createProxyMiddleware({
+          router: (req) => {
+            const m = req.url?.match(/^\/(\d+)/);
+            return m ? `https://localhost:${m[1]}` : appUrl;
+          },
+          pathRewrite: (urlPath) => urlPath.replace(/^\/\d+/, "") || "/",
+          changeOrigin: true,
+          secure: false,
+          on: {
+            error: (err, _req, _res) => {
+              if (this.config.debug) {
+                console.error(`[MockShopify] Local-HTTPS proxy error:`, err);
+              }
+            },
+          },
+        }),
+      );
+
+      // 3. Catch-all: proxy everything else to the Angular dev server.
+      //    responseInterceptor is used to inject the fetch-rewrite script into HTML
+      //    so the browser rewrites API calls through /__local-https.
+      const mainProxy = createProxyMiddleware({
+        target: appUrl,
+        changeOrigin: true,
+        secure: false,
+        selfHandleResponse: true,
+        on: {
+          proxyReq: (_proxyReq, req) => {
+            if (this.config.debug) {
+              console.log(
+                `[MockShopify] HTTP Proxy: ${req.method} ${req.url} -> ${appUrl}${req.url}`,
+              );
+            }
+          },
+          proxyRes: responseInterceptor(async (responseBuffer, proxyRes) => {
+            const contentType = proxyRes.headers["content-type"] ?? "";
+            if (contentType.includes("text/html")) {
+              const html = responseBuffer.toString("utf8");
+              return html.replace("<head>", "<head>" + headPatchScript);
+            }
+            return responseBuffer;
+          }),
+          error: (err, _req, _res) => {
+            if (this.config.debug) {
+              console.error(`[MockShopify] Proxy error:`, err);
+            }
+          },
+        },
+      });
+
+      proxyApp.use(mainProxy);
+
+      this.proxyServer = proxyApp.listen(proxyPort, () => {
+        console.log(
+          `🔀 HTTP Proxy: http://localhost:${proxyPort} -> ${appUrl}`,
+        );
+        resolve();
+      });
+
+      this.proxyServer.on("error", reject);
+
+      // Reuse the same proxy instance for WS upgrades (Angular HMR / live-reload).
+      this.proxyServer.on("upgrade", (mainProxy as any).upgrade);
+    });
+  }
+
   public async start(): Promise<void> {
+    await this.startProxyServer();
+
     return new Promise((resolve) => {
       this.server = this.app.listen(this.config.port, () => {
         console.log(`
@@ -446,7 +631,7 @@ export class MockShopifyAdminServer {
 📍 URL: http://localhost:${this.config.port}
 🏪 Shop: ${this.config.shop}
 🔑 Client ID: ${this.config.clientId}
-🎯 App URL: ${this.config.appUrl}${this.config.proxy ? '\n🔀 Proxy: /__proxy/ -> ' + this.config.appUrl : ''}
+🎯 App URL: ${this.config.appUrl}${this.config.proxyPort ? "\n🔀 HTTP Proxy: http://localhost:" + this.config.proxyPort + " -> " + this.config.appUrl : ""}
 ====================================
         `);
         resolve();
@@ -455,16 +640,24 @@ export class MockShopifyAdminServer {
   }
 
   public async stop(): Promise<void> {
-    return new Promise((resolve) => {
+    const closeMain = new Promise<void>((resolve) => {
       if (this.server) {
-        this.server.close(() => {
-          console.log('Mock Shopify Admin Server stopped');
-          resolve();
-        });
+        this.server.close(() => resolve());
       } else {
         resolve();
       }
     });
+
+    const closeProxy = new Promise<void>((resolve) => {
+      if (this.proxyServer) {
+        this.proxyServer.close(() => resolve());
+      } else {
+        resolve();
+      }
+    });
+
+    await Promise.all([closeMain, closeProxy]);
+    console.log("Mock Shopify Admin Server stopped");
   }
 
   public getConfig(): MockShopifyAdminConfig {

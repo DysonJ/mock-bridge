@@ -39,26 +39,33 @@ import { navMenu } from "./features/nav-menu";
 // gives us the correct admin origin without hardcoding it.
 // ---------------------------------------------------------------------------
 (function patchURLForMockBridge() {
-  const scriptEl = document.currentScript as HTMLScriptElement | null;
-  if (!scriptEl?.src) return;
+  // Prefer the origin injected by the proxy server's headPatchScript (which runs
+  // synchronously before Angular loads). Fall back to deriving it from this
+  // script's own src when loaded directly from the mock admin server (port 3080).
+  const adminOrigin: string =
+    (window as any).__mockAdminOrigin ??
+    (() => {
+      const scriptEl = document.currentScript as HTMLScriptElement | null;
+      return scriptEl?.src ? new URL(scriptEl.src).origin : "";
+    })();
 
-  const mockAdminOrigin = new URL(scriptEl.src).origin; // e.g. "http://localhost:3080"
+  if (!adminOrigin) return;
 
-  const _OrigURL = window.URL;
+  // Patch URL.prototype.origin rather than replacing the URL constructor.
+  // A prototype patch takes effect on *all* URL instances at .origin call time —
+  // including instances already created by bundled app-bridge-core code that
+  // captured the original constructor before this CDN script was parsed.
+  const desc = Object.getOwnPropertyDescriptor(URL.prototype, "origin");
+  const origGetter = desc?.get;
+  if (!origGetter) return;
 
-  class PatchedURL extends _OrigURL {
-    constructor(url: string | URL, base?: string | URL) {
-      super(url as string, base);
-    }
-
-    override get origin(): string {
-      const orig = super.origin;
-      return orig.endsWith(".myshopify.com") ? mockAdminOrigin : orig;
-    }
-  }
-
-  // Preserve static methods (createObjectURL, revokeObjectURL, etc.)
-  window.URL = PatchedURL as unknown as typeof URL;
+  Object.defineProperty(URL.prototype, "origin", {
+    get(): string {
+      const orig = origGetter.call(this);
+      return orig.endsWith(".myshopify.com") ? adminOrigin : orig;
+    },
+    configurable: true,
+  });
 })();
 
 (function (window) {

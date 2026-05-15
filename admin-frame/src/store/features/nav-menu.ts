@@ -2,25 +2,25 @@ import { create } from "zustand";
 import { combine } from "zustand/middleware";
 
 export type NavItem = {
+  id: string;
   label: string;
-  href: string;
+  destination: string; // route path, e.g. '/inventory'
   isHome?: boolean;
-  active?: boolean;
 }
 
 type NavMenuFeatureState = {
   items: NavItem[];
+  activeId: string | undefined;
 }
 
 export const useNavMenuFeatureStore = create(combine(
-  { items: [] } as NavMenuFeatureState,
-  set => ({
-    setItems: (payload: { items: NavItem[] }) => set({ items: payload.items }),
+  { items: [], activeId: undefined } as NavMenuFeatureState,
+  (set) => ({
+    setFromAppBridge: (payload: { items: NavItem[]; activeId: string | undefined }) =>
+      set({ items: payload.items, activeId: payload.activeId }),
 
-    addItem: (payload: NavItem) => set(state => ({
-      items: [...state.items, payload],
-    })),
+    setActive: (id: string) => set({ activeId: id }),
 
-    clearItems: () => set({ items: [] }),
+    clearItems: () => set({ items: [], activeId: undefined }),
   })
 ));

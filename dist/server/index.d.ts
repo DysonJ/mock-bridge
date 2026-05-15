@@ -1,9 +1,10 @@
-import { MockShopifyAdminConfig } from '../types';
+import { MockShopifyAdminConfig } from "../types";
 export declare class MockShopifyAdminServer {
     private app;
     private config;
     private tokenGenerator;
     private server;
+    private proxyServer;
     private mockShop;
     private mockUser;
     constructor(config: MockShopifyAdminConfig);
@@ -17,6 +18,7 @@ export declare class MockShopifyAdminServer {
      * Handle mock REST Admin API requests
      */
     private handleMockRestApi;
+    private startProxyServer;
     start(): Promise<void>;
     stop(): Promise<void>;
     getConfig(): MockShopifyAdminConfig;

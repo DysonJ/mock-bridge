@@ -147,6 +147,7 @@ async function startCommand(options) {
             ...(options.port && { port: options.port }),
             ...(options.debug && { debug: options.debug }),
             ...(options.proxy && { proxy: options.proxy }),
+            ...(options.appName && { appName: options.appName }),
         };
         // Validate configuration
         validateConfig(finalConfig);
@@ -295,6 +296,7 @@ program
     .option('-c, --config <file>', 'Path to configuration file')
     .option('-d, --debug', 'Enable debug logging', false)
     .option('--proxy', 'Proxy app through mock-bridge for same-origin iframe (enables Cypress support)', false)
+    .option('--app-name <name>', 'Display name shown in the mock admin navigation sidebar')
     .action(async (appUrl, options) => {
     // If app-url is provided as argument, use it
     if (appUrl) {
@@ -314,6 +316,7 @@ program
     .option('-c, --config <file>', 'Path to configuration file')
     .option('-d, --debug', 'Enable debug logging', false)
     .option('--proxy', 'Proxy app through mock-bridge for same-origin iframe (enables Cypress support)', false)
+    .option('--app-name <name>', 'Display name shown in the mock admin navigation sidebar')
     .action(async (appUrl, options) => {
     if (appUrl) {
         options.appUrl = appUrl;

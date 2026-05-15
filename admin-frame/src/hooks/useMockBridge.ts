@@ -7,6 +7,7 @@ import {
   type FeatureName,
 } from "../store/features";
 import { useTitleBarFeatureStore } from "../store/features/title-bar";
+import { useNavMenuFeatureStore } from "../store/features/nav-menu";
 
 export type FeatureActionRequest<
   F extends FeatureName = FeatureName,
@@ -122,6 +123,33 @@ export function useMockBridge() {
           );
         }
 
+        // Track iframe-initiated navigation (pushState/replaceState/popstate inside
+        // the app) and update the active nav item to match the new path.
+        if (event.data.type === "IFRAME_NAVIGATION") {
+          const path: string = event.data.path ?? "";
+          const { items } = useNavMenuFeatureStore.getState();
+          // Longest-prefix match so that /alerts/edit/123 correctly resolves to
+          // the "Alerts" item whose destination is /alerts.
+          let bestId: string | undefined;
+          let bestLen = -1;
+          for (const item of items) {
+            const dest = item.destination;
+            if (
+              path === dest ||
+              path.startsWith(dest + "/") ||
+              path.startsWith(dest + "?")
+            ) {
+              if (dest.length > bestLen) {
+                bestLen = dest.length;
+                bestId = item.id;
+              }
+            }
+          }
+          if (bestId) {
+            useNavMenuFeatureStore.getState().setActive(bestId);
+          }
+        }
+
         // Intercept App Bridge v3 TitleBar updates (APP::TITLEBAR::UPDATE)
         // The iframe sends { type: 'dispatch', payload: { type: 'APP::TITLEBAR::UPDATE', payload: {...} } }
         if (
@@ -156,6 +184,24 @@ export function useMockBridge() {
             })),
           });
         }
+
+        // Intercept App Bridge v3/v4 NavigationMenu updates
+        // Dispatched as: { type: 'dispatch', payload: { type: 'APP::MENU::NAVIGATION_MENU::UPDATE', payload: { items, active, id } } }
+        if (
+          event.data.type === "dispatch" &&
+          event.data.payload?.type === "APP::MENU::NAVIGATION_MENU::UPDATE"
+        ) {
+          const payload = event.data.payload?.payload ?? {};
+          const items = (payload.items ?? []).map((item: any) => ({
+            id: item.id ?? "",
+            label: item.label ?? "",
+            destination: item.destination?.path ?? item.destination ?? "/",
+          }));
+          useNavMenuFeatureStore.getState().setFromAppBridge({
+            items,
+            activeId: payload.active,
+          });
+        }
       }
     };
 
@@ -187,7 +233,9 @@ export function useMockBridge() {
     const host = btoa(config.shop);
     const idToken = sessionToken;
 
-    const origin = config.proxy ? "/__proxy" : config.appUrl;
+    const origin = config.proxyPort
+      ? `http://localhost:${config.proxyPort}`
+      : config.appUrl;
 
     return `${origin}${basePath}?host=${host}&shop=${config.shop}&embedded=1&id_token=${idToken}`;
   })();

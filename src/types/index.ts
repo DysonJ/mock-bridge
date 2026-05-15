@@ -5,14 +5,16 @@
  * - { accessToken: string }: Make direct requests to Shopify with the provided token
  */
 export type AdminApiConfig =
-  | 'mock'
+  | "mock"
   | { proxy: string }
   | { accessToken: string };
 
 export interface MockShopifyAdminConfig {
   port?: number;
+  proxyPort?: number;
   appUrl: string;
-  appPath?: string;  // Optional path to append to appUrl (e.g., '/shopify', '/admin', '')
+  appName?: string; // Display name shown in the mock admin navigation
+  appPath?: string; // Optional path to append to appUrl (e.g., '/shopify', '/admin', '')
   clientId?: string;
   clientSecret?: string;
   userId?: string;
@@ -21,8 +23,8 @@ export interface MockShopifyAdminConfig {
   scopes?: string[];
   webhooks?: MockWebhook[];
   debug?: boolean;
-  adminApi?: AdminApiConfig;  // How to handle Admin API requests (default: 'mock')
-  proxy?: boolean;  // Reverse-proxy the app through mock-bridge for same-origin iframe (Cypress support)
+  adminApi?: AdminApiConfig; // How to handle Admin API requests (default: 'mock')
+  proxy?: boolean; // Reverse-proxy the app through mock-bridge for same-origin iframe (Cypress support)
 }
 
 export interface MockWebhook {
@@ -56,18 +58,18 @@ export interface AppState {
 }
 
 export interface SessionTokenRequest {
-  type: 'SESSION_TOKEN_REQUEST';
+  type: "SESSION_TOKEN_REQUEST";
 }
 
 export interface SessionTokenResponse {
-  type: 'SESSION_TOKEN_RESPONSE';
+  type: "SESSION_TOKEN_RESPONSE";
   token: string;
 }
 
 export interface AppBridgeMessage {
   type: string;
   payload?: any;
-  source?: 'app' | 'host';
+  source?: "app" | "host";
 }
 
 export interface MockShop {
